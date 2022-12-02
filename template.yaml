@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless Chat Bot 
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 10
+    Tracing: Active
+    Handler: app.lambda_handler
+    Runtime: python3.9
+    Architectures:
+      - x86_64
+    Layers:
+      - !Ref CoreLayer
+      - !Ref DependenciesLayer
+  Api:
+    TracingEnabled: False
+
+Resources:
+  # core layer with python functions
+  CoreLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: core
+      CompatibleRuntimes:
+        - python3.9
+  # dependencies layer with requirements.txt
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: dependencies
+      CompatibleRuntimes:
+        - python3.9
+    Metadata:
+      BuildMethod: python3.9
+  # Rest endpoints
+  ChatBotApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors: 
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+        AllowOrigin: "'*'"
+      Models:
+        FeedbackModel:
+          type: object
+          required:
+            - session_id
+            - is_helpful
+          properties:
+            session_id:
+              type: string
+            is_helpful:
+              type: boolean
+        ChatModel:
+          type: object
+          required:
+            - session_id
+            - text
+          properties:
+            session_id:
+              type: string
+            text:
+              type: string
+        CreateIntentModel:
+          type: object
+          required:
+            - name
+            - description
+            - utterances
+            - response_message
+          properties:
+            name:
+              type: string
+            description:
+              type: string
+            response_message:
+              type: string
+            utterances:
+              type: array
+              items:
+                type: string
+
+  GetIntentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/GetIntents
+      Policies:
+        - AmazonLexFullAccess
+        - AWSLambdaBasicExecutionRole
+      Events:
+        GetIntents:
+          Type: Api
+          Properties:
+            Path: /intents
+            Method: get
+            RestApiId:
+              Ref: ChatBotApiGateway
+        GetIntentInfo:
+          Type: Api
+          Properties:
+            Path: /intents/{intent_id}
+            Method: get
+            RestApiId:
+              Ref: ChatBotApiGateway
+  DeleteIntentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/DeleteIntent
+      Timeout: 15
+      Policies:
+        - AmazonLexFullAccess
+        - AWSLambdaBasicExecutionRole
+      Events:
+        DeleteIntent:
+          Type: Api
+          Properties:
+            Path: /intents/{intent_id}
+            Method: delete
+            RestApiId:
+              Ref: ChatBotApiGateway
+  UpdateIntentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/UpdateIntent
+      Timeout: 15
+      Policies:
+        - AmazonLexFullAccess
+        - AWSLambdaBasicExecutionRole
+      Events:
+        PutIntent:
+          Type: Api
+          Properties:
+            Path: /intents/{intent_id}
+            Method: put
+            RestApiId:
+              Ref: ChatBotApiGateway
+  ChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/Chat
+      Policies:
+        - AmazonLexFullAccess
+        - AWSLambdaBasicExecutionRole
+      Events:
+        PostChat:
+          Type: Api
+          Properties:
+            Path: /chat
+            Method: post
+            RestApiId:
+              Ref: ChatBotApiGateway
+            RequestModel:
+              Model: ChatModel
+              Required: true
+              ValidateBody: true
+  CreatIntentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/CreateIntent
+      Timeout: 15
+      Policies:
+        - AmazonLexFullAccess
+        - AWSLambdaBasicExecutionRole
+      Events:
+        PostIntent:
+          Type: Api
+          Properties:
+            Path: /intents
+            Method: post
+            RestApiId:
+              Ref: ChatBotApiGateway
+            RequestModel:
+              Model: CreateIntentModel
+              Required: true
+              ValidateBody: true
+  FeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/Feedback
+      Timeout: 15
+      Events:
+        PostFeedback:
+          Type: Api
+          Properties:
+            Path: /feedback
+            Method: post
+            RestApiId:
+              Ref: ChatBotApiGateway
+            RequestModel:
+              Model: FeedbackModel
+              Required: true
+              ValidateBody: true
+  StatsCountFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/StatsCount
+      Timeout: 15
+      Events:
+        GetStatsCount:
+          Type: Api
+          Properties:
+            Path: /stats/count
+            Method: get
+            RestApiId:
+              Ref: ChatBotApiGateway
+  FeedbackStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/GetFeedbackStats
+      Timeout: 15
+      Events:
+        GetFeedback:
+          Type: Api
+          Properties:
+            Path: /stats/feedback
+            Method: get
+            RestApiId:
+              Ref: ChatBotApiGateway
+  OverralSessionStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/GetSessionStats
+      Timeout: 15
+      Events:
+        GetSessionStats:
+          Type: Api
+          Properties:
+            Path: /stats/session
+            Method: get
+            RestApiId:
+              Ref: ChatBotApiGateway
+
+Outputs:
+  BaseApiUrl:
+    Description: "API Gateway base URL for Prod stage for serverless-chat-bot"
+    Value: !Sub "https://${ChatBotApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  GetIntentsFunctionArn:
+    Description: "GetIntentsFunction Function ARN"
+    Value: !GetAtt GetIntentsFunction.Arn
+  ChatFunctionArn:
+    Description: "ChatFunctionArn Function ARN"
+    Value: !GetAtt ChatFunction.Arn
+  CoreLayerArn:
+    Description: "Common function Layer"
+    Value: !Ref CoreLayer
+    Export:
+      Name: !Sub '${AWS::StackName}-CoreLayerArn'
+  DependenciesLayer:
+    Description: "Layer containing following libraries: boto3[1.25.1]"
+    Value: !Ref DependenciesLayer
+    Export:
+      Name: !Sub '${AWS::StackName}-DependenciesLayer'
